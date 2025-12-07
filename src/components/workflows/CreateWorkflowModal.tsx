@@ -5,6 +5,9 @@ import { WorkflowItem, WorkflowCategory, WorkflowComplexity } from '@/lib/types'
 import { useWorkflows } from '@/context/WorkflowContext';
 import { useToast } from '@/context/ToastContext';
 
+// 图片输入模式类型
+type ImageInputMode = 'url' | 'upload';
+
 interface CreateWorkflowModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -44,8 +47,14 @@ export default function CreateWorkflowModal({
     downloadUrl: '',
   });
 
+  // 图片输入模式状态：每个图片槽位独立控制
+  const [imageInputModes, setImageInputModes] = useState<ImageInputMode[]>(['url']);
+  const [uploadingIndex, setUploadingIndex] = useState<number | null>(null);
+  const imageInputRefs = useRef<(HTMLInputElement | null)[]>([]);
+
   useEffect(() => {
     if (editData) {
+      const imageCount = editData.images.length > 0 ? editData.images.length : 1;
       setFormData({
         title: editData.title,
         description: editData.description,
@@ -56,6 +65,8 @@ export default function CreateWorkflowModal({
         workflowJson: editData.workflowJson || '',
         downloadUrl: editData.downloadUrl || '',
       });
+      // 编辑时默认使用链接模式
+      setImageInputModes(Array(imageCount).fill('url'));
     } else {
       setFormData({
         title: '',
@@ -67,6 +78,7 @@ export default function CreateWorkflowModal({
         workflowJson: '',
         downloadUrl: '',
       });
+      setImageInputModes(['url']);
     }
   }, [editData, isOpen]);
 
@@ -81,13 +93,62 @@ export default function CreateWorkflowModal({
   const addImageField = () => {
     if (formData.images.length < 4) {
       setFormData({ ...formData, images: [...formData.images, ''] });
+      setImageInputModes([...imageInputModes, 'url']);
     }
   };
 
   const removeImageField = (index: number) => {
     if (formData.images.length > 1) {
       const newImages = formData.images.filter((_, i) => i !== index);
+      const newModes = imageInputModes.filter((_, i) => i !== index);
       setFormData({ ...formData, images: newImages });
+      setImageInputModes(newModes);
+    }
+  };
+
+  // 切换图片输入模式
+  const toggleImageInputMode = (index: number) => {
+    const newModes = [...imageInputModes];
+    newModes[index] = newModes[index] === 'url' ? 'upload' : 'url';
+    setImageInputModes(newModes);
+  };
+
+  // 处理图片上传
+  const handleImageUpload = async (index: number, e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // 验证文件类型
+    if (!file.type.startsWith('image/')) {
+      showToast('请选择图片文件', 'error');
+      return;
+    }
+
+    // 验证文件大小 (最大 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      showToast('图片大小不能超过 5MB', 'error');
+      return;
+    }
+
+    setUploadingIndex(index);
+
+    try {
+      // 将图片转换为 Base64 Data URL
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const dataUrl = event.target?.result as string;
+        handleImageChange(index, dataUrl);
+        setUploadingIndex(null);
+        showToast('图片已加载', 'success');
+      };
+      reader.onerror = () => {
+        showToast('图片加载失败', 'error');
+        setUploadingIndex(null);
+      };
+      reader.readAsDataURL(file);
+    } catch (error) {
+      showToast('图片上传失败', 'error');
+      setUploadingIndex(null);
     }
   };
 
@@ -249,30 +310,114 @@ export default function CreateWorkflowModal({
             />
           </div>
 
-          {/* 图片链接 */}
+          {/* 图片链接/上传 */}
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
               预览图片 <span className="text-red-500">*</span>
-              <span className="text-xs text-gray-500 ml-2">(最多4张)</span>
+              <span className="text-xs text-gray-500 ml-2">(最多4张，支持链接或上传)</span>
             </label>
-            <div className="space-y-2">
+            <div className="space-y-3">
               {formData.images.map((img, index) => (
-                <div key={index} className="flex gap-2">
-                  <input
-                    type="url"
-                    value={img}
-                    onChange={(e) => handleImageChange(index, e.target.value)}
-                    className="flex-1 px-4 py-2 rounded-lg border border-gray-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-gray-900 dark:text-white focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                    placeholder="输入图片链接"
-                  />
-                  {formData.images.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => removeImageField(index)}
-                      className="px-3 py-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition"
-                    >
-                      <i className="fa-solid fa-trash"></i>
-                    </button>
+                <div key={index} className="space-y-2">
+                  {/* 模式切换按钮 */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-gray-500">图片 {index + 1}:</span>
+                    <div className="flex bg-gray-100 dark:bg-zinc-800 rounded-lg p-0.5">
+                      <button
+                        type="button"
+                        onClick={() => toggleImageInputMode(index)}
+                        className={`px-3 py-1 text-xs rounded-md transition ${
+                          imageInputModes[index] === 'url'
+                            ? 'bg-purple-600 text-white'
+                            : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+                        }`}
+                      >
+                        <i className="fa-solid fa-link mr-1"></i>
+                        链接
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => toggleImageInputMode(index)}
+                        className={`px-3 py-1 text-xs rounded-md transition ${
+                          imageInputModes[index] === 'upload'
+                            ? 'bg-purple-600 text-white'
+                            : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+                        }`}
+                      >
+                        <i className="fa-solid fa-upload mr-1"></i>
+                        上传
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 输入区域 */}
+                  <div className="flex gap-2">
+                    {imageInputModes[index] === 'url' ? (
+                      <input
+                        type="url"
+                        value={img}
+                        onChange={(e) => handleImageChange(index, e.target.value)}
+                        className="flex-1 px-4 py-2 rounded-lg border border-gray-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-gray-900 dark:text-white focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                        placeholder="输入图片链接"
+                      />
+                    ) : (
+                      <div className="flex-1">
+                        <input
+                          ref={(el) => { imageInputRefs.current[index] = el; }}
+                          type="file"
+                          accept="image/*"
+                          onChange={(e) => handleImageUpload(index, e)}
+                          className="hidden"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => imageInputRefs.current[index]?.click()}
+                          disabled={uploadingIndex === index}
+                          className="w-full px-4 py-2 rounded-lg border border-dashed border-gray-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-gray-500 dark:text-gray-400 hover:border-purple-500 hover:text-purple-500 transition flex items-center justify-center gap-2"
+                        >
+                          {uploadingIndex === index ? (
+                            <>
+                              <i className="fa-solid fa-spinner fa-spin"></i>
+                              上传中...
+                            </>
+                          ) : img && img.startsWith('data:') ? (
+                            <>
+                              <i className="fa-solid fa-check text-green-500"></i>
+                              <span className="text-green-500">已上传</span>
+                              <span className="text-xs">(点击更换)</span>
+                            </>
+                          ) : (
+                            <>
+                              <i className="fa-solid fa-cloud-arrow-up"></i>
+                              点击选择图片
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    )}
+                    {formData.images.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => removeImageField(index)}
+                        className="px-3 py-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition"
+                      >
+                        <i className="fa-solid fa-trash"></i>
+                      </button>
+                    )}
+                  </div>
+
+                  {/* 图片预览 */}
+                  {img && (
+                    <div className="relative w-20 h-20 rounded-lg overflow-hidden border border-gray-200 dark:border-zinc-700">
+                      <img
+                        src={img}
+                        alt={`预览 ${index + 1}`}
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).style.display = 'none';
+                        }}
+                      />
+                    </div>
                   )}
                 </div>
               ))}
