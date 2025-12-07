@@ -1,7 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
-import { WorkflowItem, WorkflowCategory } from '../lib/types';
+import { WorkflowItem } from '../lib/types';
 import { STORAGE_TYPE, isServerStorage } from '../lib/storage.types';
 
 // 静态示例数据
@@ -86,9 +86,9 @@ const staticWorkflows: WorkflowItem[] = [
 
 interface WorkflowContextType {
   workflows: WorkflowItem[];
-  addWorkflow: (workflow: Omit<WorkflowItem, 'id' | 'isCustom' | 'createdAt' | 'views' | 'downloads'>) => void;
-  updateWorkflow: (id: string | number, data: Partial<Omit<WorkflowItem, 'id' | 'createdAt'>>) => void;
-  deleteWorkflows: (ids: (string | number)[]) => void;
+  addWorkflow: (workflow: Omit<WorkflowItem, 'id' | 'isCustom' | 'createdAt' | 'views' | 'downloads'>) => Promise<void>;
+  updateWorkflow: (id: string | number, data: Partial<Omit<WorkflowItem, 'id' | 'createdAt'>>) => Promise<void>;
+  deleteWorkflows: (ids: (string | number)[]) => Promise<void>;
   importWorkflows: (workflows: Omit<WorkflowItem, 'id' | 'isCustom' | 'createdAt'>[]) => Promise<number>;
   refreshWorkflows: () => Promise<void>;
   incrementViews: (id: string | number) => Promise<number>;
@@ -156,59 +156,199 @@ export const WorkflowProvider = ({ children }: { children: React.ReactNode }) =>
     localStorage.setItem(STORAGE_KEY, JSON.stringify(workflows));
   }, []);
 
-  useEffect(() => {
-    loadFromLocalStorage();
-    setIsLoaded(true);
-  }, [loadFromLocalStorage]);
+  // ==================== D1 API 模式 ====================
+
+  const loadFromAPI = useCallback(async () => {
+    try {
+      const response = await fetch('/api/workflows');
+      const data = await response.json();
+      
+      if (data.success && data.workflows) {
+        // 如果数据库为空，初始化静态数据
+        if (data.workflows.length === 0) {
+          await initializeStaticData();
+        } else {
+          setAllWorkflows(data.workflows);
+        }
+      } else {
+        console.error('Failed to load workflows from API:', data.error);
+        // 降级到静态数据
+        setAllWorkflows(staticWorkflows);
+      }
+    } catch (error) {
+      console.error('Failed to fetch workflows:', error);
+      // API 错误时降级到静态数据
+      setAllWorkflows(staticWorkflows);
+    }
+  }, []);
+
+  const initializeStaticData = async () => {
+    try {
+      const response = await fetch('/api/workflows/batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        // isInitialData: true 表示这是初始化数据，不显示"新建"标签
+        body: JSON.stringify({ workflows: staticWorkflows, isInitialData: true }),
+      });
+      const data = await response.json();
+      
+      if (data.success) {
+        // 重新加载数据
+        const reloadResponse = await fetch('/api/workflows');
+        const reloadData = await reloadResponse.json();
+        if (reloadData.success) {
+          setAllWorkflows(reloadData.workflows);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to initialize static workflow data:', error);
+      setAllWorkflows(staticWorkflows);
+    }
+  };
+
+  // ==================== 初始化加载 ====================
 
   useEffect(() => {
-    if (isLoaded) {
+    const initLoad = async () => {
+      if (isServerStorage()) {
+        await loadFromAPI();
+      } else {
+        loadFromLocalStorage();
+      }
+      setIsLoaded(true);
+    };
+    
+    initLoad();
+  }, [loadFromAPI, loadFromLocalStorage]);
+
+  // localStorage 模式下监听变化并保存
+  useEffect(() => {
+    if (isLoaded && !isServerStorage()) {
       saveToLocalStorage(allWorkflows);
     }
   }, [allWorkflows, isLoaded, saveToLocalStorage]);
 
-  const addWorkflow = useCallback((data: Omit<WorkflowItem, 'id' | 'isCustom' | 'createdAt' | 'views' | 'downloads'>) => {
-    const newWorkflow: WorkflowItem = {
-      ...data,
-      id: `${Date.now()}-${Math.floor(Math.random() * 10000)}`,
-      isCustom: true,
-      createdAt: Date.now(),
-      views: 0,
-      downloads: 0,
-    };
-    setAllWorkflows(prev => [newWorkflow, ...prev]);
+  const addWorkflow = useCallback(async (data: Omit<WorkflowItem, 'id' | 'isCustom' | 'createdAt' | 'views' | 'downloads'>) => {
+    if (isServerStorage()) {
+      try {
+        const response = await fetch('/api/workflows', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...data, isCustom: true }),
+        });
+        const result = await response.json();
+        
+        if (result.success && result.workflow) {
+          setAllWorkflows(prev => [result.workflow, ...prev]);
+        }
+      } catch (error) {
+        console.error('Failed to add workflow:', error);
+      }
+    } else {
+      const newWorkflow: WorkflowItem = {
+        ...data,
+        id: `${Date.now()}-${Math.floor(Math.random() * 10000)}`,
+        isCustom: true,
+        createdAt: Date.now(),
+        views: 0,
+        downloads: 0,
+      };
+      setAllWorkflows(prev => [newWorkflow, ...prev]);
+    }
   }, []);
 
-  const updateWorkflow = useCallback((id: string | number, data: Partial<Omit<WorkflowItem, 'id' | 'createdAt'>>) => {
-    setAllWorkflows(prev => 
-      prev.map(item => 
-        String(item.id) === String(id) 
-          ? { ...item, ...data } 
-          : item
-      )
-    );
+  const updateWorkflow = useCallback(async (id: string | number, data: Partial<Omit<WorkflowItem, 'id' | 'createdAt'>>) => {
+    if (isServerStorage()) {
+      try {
+        const response = await fetch(`/api/workflows/${id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data),
+        });
+        const result = await response.json();
+        
+        if (result.success && result.workflow) {
+          setAllWorkflows(prev => 
+            prev.map(item => 
+              String(item.id) === String(id) ? result.workflow : item
+            )
+          );
+        }
+      } catch (error) {
+        console.error('Failed to update workflow:', error);
+      }
+    } else {
+      setAllWorkflows(prev => 
+        prev.map(item => 
+          String(item.id) === String(id) 
+            ? { ...item, ...data } 
+            : item
+        )
+      );
+    }
   }, []);
 
-  const deleteWorkflows = useCallback((ids: (string | number)[]) => {
-    setAllWorkflows(prev => prev.filter(w => !ids.includes(w.id) && !ids.includes(String(w.id))));
+  const deleteWorkflows = useCallback(async (ids: (string | number)[]) => {
+    if (isServerStorage()) {
+      try {
+        const response = await fetch('/api/workflows/batch', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids }),
+        });
+        const result = await response.json();
+        
+        if (result.success) {
+          setAllWorkflows(prev => prev.filter(w => !ids.includes(w.id) && !ids.includes(String(w.id))));
+        }
+      } catch (error) {
+        console.error('Failed to delete workflows:', error);
+      }
+    } else {
+      setAllWorkflows(prev => prev.filter(w => !ids.includes(w.id) && !ids.includes(String(w.id))));
+    }
   }, []);
 
   const importWorkflows = useCallback(async (workflows: Omit<WorkflowItem, 'id' | 'isCustom' | 'createdAt'>[]): Promise<number> => {
-    const newWorkflows = workflows.map(data => ({
-      ...data,
-      id: `${Date.now()}-${Math.floor(Math.random() * 10000)}`,
-      isCustom: true,
-      createdAt: Date.now(),
-      views: 0,
-      downloads: 0,
-    }));
-    setAllWorkflows(prev => [...newWorkflows, ...prev]);
-    return newWorkflows.length;
-  }, []);
+    if (isServerStorage()) {
+      try {
+        const response = await fetch('/api/workflows/batch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ workflows }),
+        });
+        const result = await response.json();
+        
+        if (result.success) {
+          // 重新加载数据
+          await loadFromAPI();
+          return result.imported || 0;
+        }
+      } catch (error) {
+        console.error('Failed to import workflows:', error);
+      }
+      return 0;
+    } else {
+      const newWorkflows = workflows.map(data => ({
+        ...data,
+        id: `${Date.now()}-${Math.floor(Math.random() * 10000)}`,
+        isCustom: true,
+        createdAt: Date.now(),
+        views: 0,
+        downloads: 0,
+      }));
+      setAllWorkflows(prev => [...newWorkflows, ...prev]);
+      return newWorkflows.length;
+    }
+  }, [loadFromAPI]);
 
   const refreshWorkflows = useCallback(async () => {
-    loadFromLocalStorage();
-  }, [loadFromLocalStorage]);
+    if (isServerStorage()) {
+      await loadFromAPI();
+    } else {
+      loadFromLocalStorage();
+    }
+  }, [loadFromAPI, loadFromLocalStorage]);
 
   // 从 localStorage 获取统计数据
   const getLocalStats = useCallback((id: string | number): { views: number; downloads: number } => {
