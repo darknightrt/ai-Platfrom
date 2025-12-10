@@ -531,7 +531,15 @@ export class D1Storage implements IStorage {
   async getAllWorkflows(): Promise<WorkflowItem[]> {
     try {
       const result = await this.getDb()
-        .prepare('SELECT * FROM workflows ORDER BY created_at DESC')
+         .prepare(`
+          SELECT 
+            w.*,
+            COALESCE(s.views, w.views, 0) as views,
+            COALESCE(s.downloads, w.downloads, 0) as downloads
+          FROM workflows w
+          LEFT JOIN workflow_stats s ON CAST(w.id AS TEXT) = s.workflow_id
+          ORDER BY w.created_at DESC
+        `)
         .all<DbWorkflowRecord>();
       
       return (result.results || []).map(record => this.recordToWorkflowItem(record));
@@ -547,7 +555,15 @@ export class D1Storage implements IStorage {
   async getWorkflowById(id: string | number): Promise<WorkflowItem | null> {
     try {
       const record = await this.getDb()
-        .prepare('SELECT * FROM workflows WHERE id = ?')
+        .prepare(`
+          SELECT 
+            w.*,
+            COALESCE(s.views, w.views, 0) as views,
+            COALESCE(s.downloads, w.downloads, 0) as downloads
+          FROM workflows w
+          LEFT JOIN workflow_stats s ON CAST(w.id AS TEXT) = s.workflow_id
+          WHERE w.id = ?
+        `)
         .bind(Number(id))
         .first<DbWorkflowRecord>();
       
