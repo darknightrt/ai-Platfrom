@@ -53,6 +53,14 @@ export interface DbUserRecord {
   created_at: string;
 }
 
+// 数据库中的管理员设置记录
+export interface DbAdminSettingsRecord {
+  id: number;
+  key: string;
+  value: string; // JSON 字符串
+  updated_at: string;
+}
+
 // 数据库中的工作流记录
 export interface DbWorkflowRecord {
   id: number;
@@ -113,6 +121,10 @@ export interface IStorage {
   
   // 初始化
   initializeWithStaticData?(prompts: PromptItem[]): Promise<void>;
+  
+  // 管理员设置操作
+  getAdminSettings(): Promise<Record<string, unknown>>;
+  updateAdminSettings(settings: Record<string, unknown>): Promise<boolean>;
 }
 
 // 存储类型
