@@ -234,6 +234,22 @@ export class DbManager {
     return this.storage.deleteWorkflows(ids);
   }
 
+  // ==================== 管理员设置操作 ====================
+
+  async getAdminSettings(): Promise<Record<string, unknown>> {
+    if (!this.storage) {
+      throw new Error('Server storage not available');
+    }
+    return this.storage.getAdminSettings();
+  }
+
+  async updateAdminSettings(settings: Record<string, unknown>): Promise<boolean> {
+    if (!this.storage) {
+      throw new Error('Server storage not available');
+    }
+    return this.storage.updateAdminSettings(settings);
+  }
+
   // ==================== 初始化 ====================
 
   async initializeWithStaticData(prompts: PromptItem[]): Promise<void> {
