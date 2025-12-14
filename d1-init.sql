@@ -96,6 +96,14 @@ CREATE TABLE IF NOT EXISTS usage_records (
     FOREIGN KEY (prompt_id) REFERENCES prompts(id) ON DELETE CASCADE
 );
 
+-- 管理员设置表（站点配置，实现多端同步）
+CREATE TABLE IF NOT EXISTS admin_settings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    key TEXT UNIQUE NOT NULL,
+    value TEXT NOT NULL,  -- JSON 格式存储配置值
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
 -- 创建索引以提高查询性能
 CREATE INDEX IF NOT EXISTS idx_prompts_category ON prompts(category);
 CREATE INDEX IF NOT EXISTS idx_prompts_complexity ON prompts(complexity);
@@ -112,6 +120,7 @@ CREATE INDEX IF NOT EXISTS idx_workflow_favorites_user_id ON workflow_favorites(
 CREATE INDEX IF NOT EXISTS idx_workflow_favorites_workflow_id ON workflow_favorites(workflow_id);
 CREATE INDEX IF NOT EXISTS idx_workflow_stats_workflow_id ON workflow_stats(workflow_id);
 CREATE INDEX IF NOT EXISTS idx_usage_records_prompt_id ON usage_records(prompt_id);
+CREATE INDEX IF NOT EXISTS idx_admin_settings_key ON admin_settings(key);
 
 -- 插入默认管理员账号（密码需要在部署时修改）
 -- 注意：生产环境请使用环境变量配置管理员账号
