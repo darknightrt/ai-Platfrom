@@ -9,7 +9,8 @@ import {
   D1Database, 
   DbPromptRecord, 
   DbUserRecord,
-  DbWorkflowRecord 
+  DbWorkflowRecord,
+  DbAdminSettingsRecord 
 } from './storage.types';
 
 export class D1Storage implements IStorage {
@@ -527,11 +528,12 @@ export class D1Storage implements IStorage {
 
   /**
    * 获取所有工作流
+   * 使用 LEFT JOIN 关联 workflow_stats 表获取真实的统计数据
    */
   async getAllWorkflows(): Promise<WorkflowItem[]> {
     try {
       const result = await this.getDb()
-         .prepare(`
+        .prepare(`
           SELECT 
             w.*,
             COALESCE(s.views, w.views, 0) as views,
@@ -551,6 +553,7 @@ export class D1Storage implements IStorage {
 
   /**
    * 根据 ID 获取工作流
+   * 使用 LEFT JOIN 关联 workflow_stats 表获取真实的统计数据
    */
   async getWorkflowById(id: string | number): Promise<WorkflowItem | null> {
     try {
@@ -752,6 +755,65 @@ export class D1Storage implements IStorage {
       console.error('Failed to initialize  user:', error);
     }
   }
+
+  // ==================== 管理员设置操作 ====================
+
+  /**
+   * 获取所有管理员设置
+   * 返回合并后的配置对象
+   */
+  async getAdminSettings(): Promise<Record<string, unknown>> {
+    try {
+      const result = await this.getDb()
+        .prepare('SELECT key, value FROM admin_settings')
+        .all<DbAdminSettingsRecord>();
+      
+      const settings: Record<string, unknown> = {};
+      
+      for (const record of result.results || []) {
+        try {
+          settings[record.key] = JSON.parse(record.value);
+        } catch {
+          settings[record.key] = record.value;
+        }
+      }
+      
+      return settings;
+    } catch (error) {
+      console.error('Failed to get admin settings:', error);
+      return {};
+    }
+  }
+
+  /**
+   * 更新管理员设置
+   * 使用 UPSERT 模式：存在则更新，不存在则插入
+   */
+  async updateAdminSettings(settings: Record<string, unknown>): Promise<boolean> {
+    try {
+      const now = new Date().toISOString();
+      
+      for (const [key, value] of Object.entries(settings)) {
+        const valueJson = JSON.stringify(value);
+        
+        await this.getDb()
+          .prepare(`
+            INSERT INTO admin_settings (key, value, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = ?, updated_at = ?
+          `)
+          .bind(key, valueJson, now, valueJson, now)
+          .run();
+      }
+      
+      return true;
+    } catch (error) {
+      console.error('Failed to update admin settings:', error);
+      return false;
+    }
+  }
+
+  // ==================== 初始化 ====================
 
   /**
    * 用静态数据初始化数据库
