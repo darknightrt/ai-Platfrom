@@ -64,8 +64,3 @@
 # 存储模式（可选）
 # localstorage - 浏览器本地存储（默认）
 # d1 - Cloudflare D1 数据库
-NEXT_PUBLIC_STORAGE_TYPE=localstorage
-```
-
-
-
